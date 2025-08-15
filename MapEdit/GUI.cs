@@ -224,6 +224,67 @@ public class GUI : Form
 		return pctSurface.Handle;
 	}
 
+	internal void SwitchToLayerAndSheet(int layer, string texture)
+	{
+		try
+		{
+			if (layer >= 0 && layer < cmbLayer.Items.Count)
+			{
+				cmbLayer.SelectedIndex = layer;
+			}
+			if (!string.IsNullOrEmpty(texture))
+			{
+				for (int i = 0; i < lstSheets.Items.Count; i++)
+				{
+					if (lstSheets.Items[i].ToString() == texture)
+					{
+						lstSheets.SelectedIndex = i;
+						break;
+					}
+				}
+				
+				// Ensure the tree view is visible and properly positioned (like in cmbLayer_SelectedIndexChanged)
+				trvCells.Visible = true;
+				trvCells.Location = new System.Drawing.Point(txtRScript.Location.X, txtRScript.Location.Y);
+				trvCells.Size = new Size(txtRScript.Size.Width, txtRScript.Size.Height);
+				
+				// Update the tree for the new sheet
+				UpdateCellTree();
+				
+				// Now expand all nodes in the tree view to show sub-folders
+				try 
+				{ 
+					// Force a refresh to ensure the tree is properly populated
+					trvCells.Refresh();
+					
+					// Expand all nodes
+					trvCells.ExpandAll(); 
+					
+					// Ensure the first node is visible
+					if (trvCells.Nodes.Count > 0)
+					{
+						trvCells.Nodes[0].EnsureVisible();
+					}
+					
+					// Also auto-select the first node so palette draws immediately (like in lstSheets_SelectedIndexChanged)
+					if (trvCells.Nodes.Count > 0)
+					{
+						trvCells.SelectedNode = trvCells.Nodes[0];
+					}
+				} 
+				catch {}
+				
+				// Set the palette to redraw
+				Game1.needsPaletteDraw = true;
+			}
+		}
+		catch {}
+	}
+	
+
+	
+
+
 	public void Initialize()
 	{
 		PopulateSheets();
@@ -344,6 +405,9 @@ public class GUI : Form
 			}
 			Game1.selTex = (string)lstSheets.Items[lstSheets.SelectedIndex];
 			UpdateCellTree();
+			try { trvCells.ExpandAll(); } catch {}
+			// also auto-select the first node so palette draws immediately
+			try { if (trvCells.Nodes.Count > 0) trvCells.SelectedNode = trvCells.Nodes[0]; } catch {}
 			Game1.needsPaletteDraw = true;
 			lstCells.Items.Clear();
 			for (int i = 0; i < Game1.textures[Game1.selTex].cell.Length && Game1.textures[Game1.selTex].cell[i] != null; i++)
@@ -611,6 +675,7 @@ public class GUI : Form
 		if (name != null && texture != null && Game1.nodes.ContainsKey(texture))
 		{
 			TreeNode treeNode = Game1.nodes[texture].Clone() as TreeNode;
+			// We need to prune the tree to create the proper structure, but then expand it
 			PruneTree(treeNode);
 			treeNode.Text = name;
 			trvCells.Nodes.Add(treeNode);
@@ -704,6 +769,16 @@ public class GUI : Form
 
 	private void mnuFileSave_Click(object sender, EventArgs e)
 	{
+		PerformSave();
+	}
+
+	internal void PerformSave()
+	{
+		if (string.IsNullOrEmpty(fullPath))
+		{
+			return;
+		}
+
 		Game1.map.Write(fullPath, Game1.textures);
 		string[] array = fullPath.Split('\\');
 		string text = array[array.Length - 1];
@@ -1390,44 +1465,8 @@ public class GUI : Form
 
     private void pctCells_DoubleClick(object sender, EventArgs e)
 	{
-		if (Game1.selLayer <= -1 || Game1.selLayer >= 20)
-		{
-			return;
-		}
-		Seg seg = new Seg();
-		seg.idx = Game1.selIdx;
-		seg.texture = Game1.selTex;
-		seg.loc = ScrollManager.scroll;
-		seg.scaling = new Vector2(1f, 1f);
-		if (Game1.flipMode)
-		{
-			seg.rotation = 3.141593f;
-		}
-		if (Game1.selLayer == 19)
-		{
-			seg.texture = MonsterCatalog.catalog[Game1.selIdx].name;
-		}
-		else
-		{
-			try
-			{
-				if (Game1.textures[seg.texture].type == 3)
-				{
-					seg.strFlag = Game1.textures[seg.texture].cell[Game1.selIdx].name;
-				}
-			}
-			catch
-			{
-				return;
-			}
-		}
-		Game1.map.layer[Game1.selLayer].seg.Add(seg);
-		Game1.map.mapGrid.needsUpdate = true;
-		PopulateMapCells();
-		if (Game1.selLayer == 19)
-		{
-			Game1.needsActorUpdate = true;
-		}
+        // Disabled: spawning handled on single-click now
+        return;
 	}
 
 	private void pctCells_MouseEnter(object sender, EventArgs e)
@@ -1544,8 +1583,12 @@ public class GUI : Form
 		paletteScrolling = false;
 		if (e.Button == MouseButtons.Right && Game1.selLayer < 19 && Game1.selSeg >= 0 && Game1.selLayer >= 0)
 		{
-			Game1.map.layer[Game1.selLayer].seg[Game1.selSeg].idx = Game1.selIdx;
-			Game1.map.layer[Game1.selLayer].seg[Game1.selSeg].texture = Game1.selTex;
+			Seg target = Game1.map.layer[Game1.selLayer].seg[Game1.selSeg];
+			if (target != null && !target.isLocked)
+			{
+				target.idx = Game1.selIdx;
+				target.texture = Game1.selTex;
+			}
 		}
 	}
 
@@ -1846,7 +1889,49 @@ public class GUI : Form
 
 	private void pctCells_Click(object sender, EventArgs e)
 	{
-	}
+        if (Game1.selLayer <= -1 || Game1.selLayer >= 20)
+        {
+            return;
+        }
+        Seg seg = new Seg();
+        seg.idx = Game1.selIdx;
+        seg.texture = Game1.selTex;
+        seg.loc = ScrollManager.scroll;
+        seg.scaling = new Vector2(1f, 1f);
+        if (Game1.flipMode)
+        {
+            seg.rotation = 3.141593f;
+        }
+        if (Game1.selLayer == 19)
+        {
+            seg.texture = MonsterCatalog.catalog[Game1.selIdx].name;
+        }
+        else
+        {
+            try
+            {
+                if (Game1.textures[seg.texture].type == 3)
+                {
+                    seg.strFlag = Game1.textures[seg.texture].cell[Game1.selIdx].name;
+                }
+            }
+            catch
+            {
+                return;
+            }
+        }
+        if (seg != null)
+        {
+            seg.isLocked = false;
+        }
+        Game1.map.layer[Game1.selLayer].seg.Add(seg);
+        Game1.map.mapGrid.needsUpdate = true;
+        PopulateMapCells();
+        if (Game1.selLayer == 19)
+        {
+            Game1.needsActorUpdate = true;
+        }
+    }
 
 	private void sendToBackToolStripMenuItem_Click(object sender, EventArgs e)
 	{
